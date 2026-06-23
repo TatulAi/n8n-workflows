@@ -21,8 +21,8 @@ A collection of automation workflows I've built with [n8n](https://n8n.io), an o
 
 I build automations that save businesses time by connecting their tools and removing manual data entry. Available for freelance and remote automation work.
 
-- **Email:** your.email@example.com
-- **Upwork / LinkedIn:** _add your links here_
+- **Email:** tatul.ghazaryan.ai@gmail.com
+- **LinkedIn:** https://www.linkedin.com/in/ai-tatul/
 
 ## Skills
 
