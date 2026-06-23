@@ -1,0 +1,986 @@
+{
+  "name": "Gmail AI Triage - Email fllter",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "hour": 23,
+              "minute": 59
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "readStatus": "unread"
+        },
+        "options": {}
+      },
+      "id": "69395320-4ec3-44a2-aaac-06ef0d58f7c4",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [
+        -3536,
+        1168
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "7dYIQbmJZxxOOhVh",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const d = $json;\nconst pick = (...keys) => {\n  for (const k of keys) {\n    if (d[k] !== undefined && d[k] !== null && d[k] !== '') return d[k];\n  }\n  return '';\n};\nconst toStr = (v, name) => {\n  if (!v) return '';\n  let s;\n  if (typeof v === 'string') { s = v; }\n  else if (Array.isArray(v)) { s = v.map(x => x.text || x.address || x.value || (x.name ? `${x.name} <${x.address||''}>` : '')).join(', '); }\n  else if (typeof v === 'object') { s = v.text || v.value || v.address || (v.name ? `${v.name} <${v.address||''}>` : JSON.stringify(v)); }\n  else { s = String(v); }\n  return s.replace(new RegExp('^\\\\s*' + name + ':\\\\s*', 'i'), '').trim();\n};\nconst headers = d.payload?.headers || [];\nconst getHeader = (n) => Array.isArray(headers) ? (headers.find(h => (h.name||'').toLowerCase() === n)?.value || '') : '';\n\nconst subject = toStr(pick('subject', 'Subject'), 'Subject') || getHeader('subject');\nconst from    = toStr(pick('from', 'From'), 'From') || getHeader('from');\nconst to      = toStr(pick('to', 'To'), 'To') || getHeader('to');\nconst listUnsub = toStr(pick('list-unsubscribe', 'listUnsubscribe', 'List-Unsubscribe'), 'List-Unsubscribe') || getHeader('list-unsubscribe');\n\nfunction decode(str){ if(!str) return ''; return Buffer.from(String(str).replace(/-/g,'+').replace(/_/g,'/'),'base64').toString('utf8'); }\nfunction extractBody(payload){\n  if(!payload) return '';\n  if(payload.body?.data) return decode(payload.body.data);\n  if(payload.parts){\n    for(const p of payload.parts){ if(p.mimeType==='text/plain' && p.body?.data) return decode(p.body.data); }\n    for(const p of payload.parts){ const r=extractBody(p); if(r) return r; }\n  }\n  return '';\n}\nlet body = pick('text', 'textPlain') || extractBody(d.payload) || pick('html', 'snippet');\nif (typeof body !== 'string') body = JSON.stringify(body);\nbody = body.replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').trim().slice(0, 4000);\n\nreturn { json: {\n  messageId: d.id || '',\n  threadId: d.threadId || '',\n  subject, from, to,\n  listUnsubscribe: listUnsub,\n  body\n}};"
+      },
+      "id": "dbd4787e-de57-45db-b5d5-85bafea5fb82",
+      "name": "Extract Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3024,
+        1168
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "batchSize": 5,
+        "options": {}
+      },
+      "id": "e87fe736-24f6-4278-9e44-b065f0a8312d",
+      "name": "Loop Over Items",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -2688,
+        912
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Analyze this email and decide how to handle it.\n\nFrom: {{ $json.from }}\nTo: {{ $json.to }}\nSubject: {{ $json.subject }}\nHas unsubscribe header: {{ $json.listUnsubscribe ? 'yes' : 'no' }}\nBody:\n{{ $json.body }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You are an email triage assistant. For each email return TWO decisions.\n\nACTION \u2014 classify into exactly one of these categories:\n- \"spam\": worthless junk, scams, cold marketing the user never asked for. Will be moved to trash, so only use when clearly worthless, confidence above 0.85.\n- \"newsletter\": editorial or promotional bulk content (digests, marketing campaigns, content roundups) with no action needed. Will be moved to trash. Do NOT use for anything transactional or actionable even if it has an unsubscribe link.\n- \"notification\": automated confirmations and acknowledgements of things already done, especially actions the USER initiated themselves: \"API key created\", \"password changed\", \"order placed\", \"login from new device you recognize\", receipts, system status updates, social media activity notifications (LinkedIn reactions, connection suggestions, job alerts that are purely informational).\n- \"administrative\": bills, invoices, taxes, government, banking statements, account/legal/policy matters.\n- \"business\": work-related mail, clients, business opportunities, recruiters writing personally, professional correspondence.\n- \"personal\": a real human writing personally to the user (friends, family, individual messages).\n- \"unknown\": anything ambiguous. When in doubt between trash-bound categories (spam/newsletter) and anything else, ALWAYS choose the non-trash category or \"unknown\". Never risk trashing something real.\n\nREADSTATE:\n- \"markRead\": the user does not need to see this as unread \u2014 confirmations of their own actions, pure FYI notifications, routine receipts.\n- \"keepUnread\": requires a reply, action, or decision; time-sensitive; from a real human; information the user likely does not already know.\n\nRules: security alerts about SUSPICIOUS activity (unrecognized login, fraud warning) are \"administrative\" + \"keepUnread\", never \"notification\". When unsure about readState, choose \"keepUnread\".\nProvide a one-line reason covering both decisions."
+        }
+      },
+      "id": "7dc0d85a-02ac-42b9-a43b-9138026344b0",
+      "name": "AI Triage Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "position": [
+        -2496,
+        1072
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "options": {
+          "temperature": 0
+        }
+      },
+      "id": "c78cbc0f-0c8e-492f-a653-592c36b30167",
+      "name": "Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [
+        -2496,
+        1296
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "y4TCxfhs6VV4GmvS",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"action\": \"notification\",\n  \"readState\": \"markRead\",\n  \"confidence\": 0.9,\n  \"reason\": \"short explanation of both decisions\"\n}"
+      },
+      "id": "29da0132-a341-4f9c-9f74-ae0620692e63",
+      "name": "Output Parser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        -2352,
+        1296
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const ai = $json.output || $json;\n\n// Pull the matching original item from the loop by position\nconst loopItems = $('Loop Over Items').all();\nconst idx = $itemIndex;\nconst orig = (loopItems[idx] && loopItems[idx].json) ? loopItems[idx].json : $json;\n\nreturn { json: {\n  messageId: orig.messageId || '',\n  threadId: orig.threadId || '',\n  from: orig.from || '',\n  subject: orig.subject || '',\n  action: ai.action || 'unknown',\n  readState: ai.readState === 'markRead' ? 'markRead' : 'keepUnread',\n  confidence: typeof ai.confidence === 'number' ? ai.confidence : 0,\n  reason: ai.reason || 'no reason returned'\n}};"
+      },
+      "id": "3417ff78-9025-42a2-b667-4b046f0f20da",
+      "name": "Merge Decision",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2160,
+        1056
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "amount": 2
+      },
+      "id": "914586a5-0fa2-4a31-8b37-a1a8c049b6bf",
+      "name": "Wait",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -1840,
+        1040
+      ],
+      "webhookId": "ab8079e1-45ba-4316-8d54-3cf08b2ff607"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "spam",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "6cfae2a2-7941-4a9b-942e-fef6dacca940"
+                  },
+                  {
+                    "leftValue": "={{ $json.confidence }}",
+                    "rightValue": 0.85,
+                    "operator": {
+                      "type": "number",
+                      "operation": "gt"
+                    },
+                    "id": "d665e181-90fd-4eb5-876f-57a481120012"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "newsletter",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "52c05616-c1e4-478f-85e5-74922057c5ac"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "notification",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "b77caf11-a8fd-44df-a414-5cb16ea5e173"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "administrative",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "add6afb9-fadc-4d81-a88e-6e4132c2e717"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "business",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bc2e1b53-a2d7-4ae0-8713-e001039fd338"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "personal",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "0d4ff3e5-3e24-43d0-986d-ab7a9b45b800"
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "a6654597-754b-4612-bd3e-aa5e9657faa0",
+      "name": "Route Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        -1616,
+        816
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "thread",
+        "operation": "trash",
+        "threadId": "={{ $('Merge Decision').item.json.threadId }}"
+      },
+      "id": "23173959-cf33-4aa3-a523-f021008b673b",
+      "name": "Label Spam1",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        -1088,
+        496
+      ],
+      "webhookId": "b4a139b9-818a-40db-9310-c877e5e7890c",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "7dYIQbmJZxxOOhVh",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "resource": "thread",
+        "operation": "trash",
+        "threadId": "={{ $json.messages[0].threadId }}"
+      },
+      "id": "dbc8fe7a-e3d8-41df-b266-dbf0cb332f96",
+      "name": "Trash Spam",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        -816,
+        496
+      ],
+      "webhookId": "b74c436f-d289-4e56-8030-05f38a753300",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "7dYIQbmJZxxOOhVh",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $('Merge Decision').item.json.messageId }}",
+        "labelIds": [
+          "Label_9069014010934536609"
+        ]
+      },
+      "id": "5fda847c-bd45-41ea-909c-2833ae8968df",
+      "name": "Label Newsletters",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        -1088,
+        656
+      ],
+      "webhookId": "9b5e0197-086d-412b-a059-03ffbdc5296b",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "7dYIQbmJZxxOOhVh",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "resource": "thread",
+        "operation": "trash",
+        "threadId": "={{ $('Merge Decision').item.json.threadId }}"
+      },
+      "id": "f5d43583-97ae-40a8-bcac-196788976412",
+      "name": "Trash Newsletter",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        -816,
+        656
+      ],
+      "webhookId": "dacdc535-dc23-484e-ba1f-0735d76db498",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "7dYIQbmJZxxOOhVh",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $json.messageId }}",
+        "labelIds": [
+          "Label_2524713020767010244"
+        ]
+      },
+      "id": "b1995f28-6c17-4449-8184-8b428dad9460",
+      "name": "Label Notifications",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        -1088,
+        816
+      ],
+      "webhookId": "2cb2fa16-c1d9-4813-a61c-59fc137a2bfe",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "7dYIQbmJZxxOOhVh",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $('Merge Decision').item.json.messageId }}",
+        "labelIds": [
+          "Label_1038454123526748893"
+        ]
+      },
+      "id": "f7f5c3ac-fb4f-4d58-9a01-132f0837ec39",
+      "name": "Label Administrative",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        -1088,
+        976
+      ],
+      "webhookId": "a773756f-4329-4a8a-8b1c-989a533e09ae",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "7dYIQbmJZxxOOhVh",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $('Merge Decision').item.json.messageId }}",
+        "labelIds": [
+          "Label_3442140022413057925"
+        ]
+      },
+      "id": "a168cd1b-a1c1-4ceb-8676-08e75270af48",
+      "name": "Label Businness",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        -1088,
+        1136
+      ],
+      "webhookId": "75caf033-8428-45b2-95d3-3133344fd4f6",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "7dYIQbmJZxxOOhVh",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $('Merge Decision').item.json.messageId }}",
+        "labelIds": [
+          "Label_4020800204883798246"
+        ]
+      },
+      "id": "83be1149-170e-4530-827a-e78b9a6255f0",
+      "name": "Label Personal",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        -1088,
+        1296
+      ],
+      "webhookId": "86ac77be-33ff-44a4-98ae-b1446cffab9c",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "7dYIQbmJZxxOOhVh",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "markAsRead",
+        "messageId": "={{ $('Merge Decision').item.json.messageId }}"
+      },
+      "id": "239dfeb3-2e31-412f-bbb0-d0bbfd2e9859",
+      "name": "Mark Notification Read",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        -816,
+        816
+      ],
+      "webhookId": "a8f05c6c-3071-4dd3-b18a-536889eb2945",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "7dYIQbmJZxxOOhVh",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.labelIds[0] }}",
+              "rightValue": "markRead",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "id": "487d1a18-c25b-4ac5-bd6c-d52929fe1a02"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "9e22a542-ff1c-4b03-8036-4c5c81671dfe",
+      "name": "Should Mark Read?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -784,
+        1136
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "markAsRead",
+        "messageId": "={{ $('Merge Decision').item.json.messageId }}"
+      },
+      "id": "ba6f2699-1be4-4da5-913d-063f2d557987",
+      "name": "Mark Read",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        -528,
+        1120
+      ],
+      "webhookId": "e63cfb12-b772-4856-a122-af234357e34f",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "7dYIQbmJZxxOOhVh",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const item = $json;\nconst err = item.error || item.errorMessage || 'unknown error';\nreturn { json: {\n  failedMessageId: item.messageId || 'unknown',\n  from: item.from || 'unknown',\n  subject: item.subject || 'unknown',\n  error: typeof err === 'object' ? JSON.stringify(err) : err,\n  timestamp: new Date().toISOString()\n}};"
+      },
+      "id": "c204d2d2-5d3f-4c5c-9179-d370798eed26",
+      "name": "Error Logger",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1840,
+        1568
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "limit": 25,
+        "filters": {
+          "readStatus": "unread"
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        -3280,
+        1168
+      ],
+      "id": "e03b9680-87a8-4e43-b9df-f0e4bb44a834",
+      "name": "Get many messages",
+      "webhookId": "e8b39f68-3d6c-4411-b2e6-97dbb1b47343",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "7dYIQbmJZxxOOhVh",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get many messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Content": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Logger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Route Action",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Triage Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Triage Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Triage Agent": {
+      "main": [
+        [
+          {
+            "node": "Merge Decision",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Logger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Decision": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Logger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Action": {
+      "main": [
+        [
+          {
+            "node": "Label Spam1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Label Newsletters",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Label Notifications",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Label Administrative",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Label Businness",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Label Personal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Label Spam1": {
+      "main": [
+        [
+          {
+            "node": "Trash Spam",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Logger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trash Spam": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Error Logger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Label Newsletters": {
+      "main": [
+        [
+          {
+            "node": "Trash Newsletter",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Logger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trash Newsletter": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Error Logger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Label Notifications": {
+      "main": [
+        [
+          {
+            "node": "Mark Notification Read",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Logger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Label Administrative": {
+      "main": [
+        [
+          {
+            "node": "Should Mark Read?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Logger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Label Businness": {
+      "main": [
+        [
+          {
+            "node": "Should Mark Read?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Logger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Label Personal": {
+      "main": [
+        [
+          {
+            "node": "Should Mark Read?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Logger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Mark Read?": {
+      "main": [
+        [
+          {
+            "node": "Mark Read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI Triage Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get many messages": {
+      "main": [
+        [
+          {
+            "node": "Extract Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "timezone": "Europe/Bratislava",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "c429ded7-431f-49a4-86ff-0919442c283b",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "b7752480f11d4662f88f5921ae0d3ff880e9952367c59242e4245e3fb0d6f3f2"
+  },
+  "nodeGroups": [],
+  "id": "qrkbpjsDCwDMS7Hb",
+  "tags": []
+}

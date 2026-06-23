@@ -6,6 +6,7 @@ A collection of automation workflows I've built with [n8n](https://n8n.io), an o
 
 | Workflow | What it does | Apps used |
 |----------|-------------|-----------|
+| [Gmail AI Triage](workflows/gmail-ai-triage.json) | AI agent that classifies, labels, and sorts incoming email automatically — with safe-by-default rules and error handling | Gmail, OpenAI |
 | [Stripe → Google Sheets](workflows/stripe-to-sheets.json) | Logs every new Stripe payment into a spreadsheet automatically | Stripe, Google Sheets |
 | _(more coming as I build them)_ | | |
 
@@ -17,6 +18,8 @@ A collection of automation workflows I've built with [n8n](https://n8n.io), an o
 4. Add your own credentials for each connected app.
 5. Activate the workflow.
 
+> **Note:** No credentials or API keys are included in any workflow file here. You'll add your own after importing.
+
 ## About me
 
 I build automations that save businesses time by connecting their tools and removing manual data entry. Available for freelance and remote automation work.
@@ -27,5 +30,6 @@ I build automations that save businesses time by connecting their tools and remo
 ## Skills
 
 - n8n workflow design (triggers, data transformation, error handling)
+- AI agents and LLM integration (OpenAI, structured output parsing)
 - API integrations (REST, webhooks, OAuth)
 - Connecting CRMs, spreadsheets, payment systems, and messaging apps
