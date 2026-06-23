@@ -1,2 +1,31 @@
-# n8n-workflows
-Collection of n8n automation workflows and notes
+# n8n Automation Workflows
+
+A collection of automation workflows I've built with [n8n](https://n8n.io), an open-source workflow automation tool. Each workflow connects apps and services to automate repetitive tasks — no manual work required.
+
+## What's here
+
+| Workflow | What it does | Apps used |
+|----------|-------------|-----------|
+| [Stripe → Google Sheets](workflows/stripe-to-sheets.json) | Logs every new Stripe payment into a spreadsheet automatically | Stripe, Google Sheets |
+| _(more coming as I build them)_ | | |
+
+## How to use these workflows
+
+1. Download the `.json` file for the workflow you want.
+2. In n8n, go to **Workflows → Import from File**.
+3. Select the downloaded file.
+4. Add your own credentials for each connected app.
+5. Activate the workflow.
+
+## About me
+
+I build automations that save businesses time by connecting their tools and removing manual data entry. Available for freelance and remote automation work.
+
+- **Email:** your.email@example.com
+- **Upwork / LinkedIn:** _add your links here_
+
+## Skills
+
+- n8n workflow design (triggers, data transformation, error handling)
+- API integrations (REST, webhooks, OAuth)
+- Connecting CRMs, spreadsheets, payment systems, and messaging apps

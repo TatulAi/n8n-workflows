@@ -1,0 +1,30 @@
+{
+  "name": "Stripe to Google Sheets",
+  "nodes": [
+    {
+      "parameters": {
+        "events": ["payment_intent.succeeded"]
+      },
+      "name": "Stripe Trigger",
+      "type": "n8n-nodes-base.stripeTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": "YOUR_SHEET_ID",
+        "range": "A:C"
+      },
+      "name": "Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 2,
+      "position": [550, 300]
+    }
+  ],
+  "connections": {
+    "Stripe Trigger": {
+      "main": [[{ "node": "Google Sheets", "type": "main", "index": 0 }]]
+    }
+  }
+}
