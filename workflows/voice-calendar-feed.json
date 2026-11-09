@@ -1,0 +1,71 @@
+{
+  "name": "voice-calendar-feed",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "voice-calendar-feed",
+        "responseMode": "responseNode",
+        "options": { "allowedOrigins": "https://your-site.example" }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [0, 0],
+      "id": "f9ff4657-d4ac-44f9-9021-0dfc575ad3ef",
+      "name": "GET calendar feed"
+    },
+    {
+      "parameters": {
+        "resource": "event",
+        "operation": "getAll",
+        "calendar": { "__rl": true, "mode": "id", "value": "YOUR_CALENDAR_ID" },
+        "returnAll": true,
+        "timeMin": "={{ $now.setZone(\"Europe/Bratislava\").startOf(\"day\").toISO() }}",
+        "timeMax": "={{ $now.setZone(\"Europe/Bratislava\").startOf(\"day\").plus({ days: 7 }).toISO() }}",
+        "options": { "recurringEventHandling": "expand", "orderBy": "startTime" }
+      },
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [224, 0],
+      "id": "6aecba84-0fe5-476b-a2e6-5be46013a786",
+      "name": "Get calendar events",
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleCalendarOAuth2Api": { "id": "", "name": "Google Calendar account" }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Name first, so a narrow calendar block clips the service rather than the name.\nconst toTitle = (summary = '') => {\n  const [service, name] = summary.replace(/_/g, ' ').split(' - ');\n  return name ? `${name} - ${service}` : service;\n};\nconst bookings = $input.all()\n  .filter((item) => item.json.start?.dateTime && item.json.end?.dateTime)\n  .map((item) => ({\n    start: new Date(item.json.start.dateTime).toISOString(),\n    end: new Date(item.json.end.dateTime).toISOString(),\n    title: toTitle(item.json.summary),\n  }));\nreturn [{ json: { bookings } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [448, 0],
+      "id": "d41c1ac8-b241-41a3-aa79-c1c1ea69c8ce",
+      "name": "Keep times and title"
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {
+          "responseHeaders": {
+            "entries": [{ "name": "Cache-Control", "value": "no-store" }]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [672, 0],
+      "id": "36d8193c-aef5-4620-8a7b-57fa69fc0011",
+      "name": "Respond with bookings"
+    }
+  ],
+  "connections": {
+    "GET calendar feed": { "main": [[{ "node": "Get calendar events", "type": "main", "index": 0 }]] },
+    "Get calendar events": { "main": [[{ "node": "Keep times and title", "type": "main", "index": 0 }]] },
+    "Keep times and title": { "main": [[{ "node": "Respond with bookings", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

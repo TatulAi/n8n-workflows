@@ -8,6 +8,7 @@ A collection of automation workflows I've built with [n8n](https://n8n.io), an o
 |----------|-------------|-----------|
 | [Gmail AI Triage](workflows/gmail-ai-triage.json) | AI agent that classifies, labels, and sorts incoming email automatically — with safe-by-default rules and error handling | Gmail, OpenAI |
 | [Stripe → Google Sheets](workflows/stripe-to-sheets.json) | Logs every new Stripe payment into a spreadsheet automatically | Stripe, Google Sheets |
+| [Voice Booking Agent](docs/voice-booking-agent.md) | Voice AI receptionist that checks real availability and books during the call — adaptable to clinics, salons, hotels and other businesses with a reception (4 workflows) | ElevenLabs, Google Calendar |
 | _(more coming as I build them)_ | | |
 
 ## How to use these workflows

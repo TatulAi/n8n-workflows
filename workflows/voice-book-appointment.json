@@ -1,0 +1,172 @@
+{
+  "name": "voice-book-appointment",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "book-appointment",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [0, 0],
+      "id": "bce13b80-2482-47c2-8a9c-ab3e1380b997",
+      "name": "Webhook",
+      "credentials": {
+        "httpHeaderAuth": { "id": "", "name": "Voice agent key" }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "4eef5135-7ae1-4f54-bcbd-86d1ed82fa62",
+              "name": "date",
+              "value": "={{ $json.body.date }}",
+              "type": "string"
+            },
+            {
+              "id": "1db3de4b-1eba-4107-a56a-ef2e5bd856a3",
+              "name": "time",
+              "value": "={{ ($json.body.time || \"\").trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "b501533c-d754-4a87-9bd4-3825539c13ec",
+              "name": "service",
+              "value": "={{ ($json.body.service || \"\").toLowerCase().trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "59f96994-62e0-46b0-89ad-4baf7a5df263",
+              "name": "customer_name",
+              "value": "={{ ($json.body.customer_name || \"\").trim() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [224, 0],
+      "id": "03114d12-5afe-4ca2-8960-3be4293ade38",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": { "__rl": true, "value": "YOUR_CALENDAR_ID", "mode": "id" },
+        "returnAll": true,
+        "timeMin": "={{ $json.date }}T00:00:00+01:00",
+        "timeMax": "={{ $json.date }}T23:59:59+01:00",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [448, 0],
+      "id": "e3f2e750-6a07-40ca-b243-bc6a41eada31",
+      "name": "Get many events",
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleCalendarOAuth2Api": { "id": "", "name": "Google Calendar account" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const DURATIONS = { haircut: 30, beard_trim: 20, combo: 45 };\nconst { date, time, service, customer_name } = $('Edit Fields').first().json;\n\nconst duration = DURATIONS[service];\nif (!duration) {\n  return [{ json: { ok: false, reason: 'unknown_service' } }];\n}\nif (!/^\\d{2}:\\d{2}$/.test(time) || !customer_name) {\n  return [{ json: { ok: false, reason: 'invalid_input' } }];\n}\nif (new Date(`${date}T12:00:00`).getDay() === 0) {\n  return [{ json: { ok: false, reason: 'closed_sunday' } }];\n}\n\nconst [h, m] = time.split(':').map(Number);\nconst startMin = h * 60 + m;\nconst endMin = startMin + duration;\nif (startMin < 9 * 60 || endMin > 18 * 60) {\n  return [{ json: { ok: false, reason: 'outside_hours' } }];\n}\n\nconst fmt = new Intl.DateTimeFormat('en-GB', {\n  timeZone: 'Europe/Bratislava', hour: '2-digit', minute: '2-digit', hour12: false,\n});\nconst toMin = (iso) => {\n  const [hh, mm] = fmt.format(new Date(iso)).split(':').map(Number);\n  return hh * 60 + mm;\n};\n\nconst busy = $input.all().map(i => i.json)\n  .filter(e => e.start?.dateTime && e.end?.dateTime)\n  .map(e => ({ start: toMin(e.start.dateTime), end: toMin(e.end.dateTime) }));\n\nif (busy.some(b => startMin < b.end && endMin > b.start)) {\n  return [{ json: { ok: false, reason: 'slot_taken' } }];\n}\n\nconst pad = (n) => String(n).padStart(2, '0');\nconst endTime = `${pad(Math.floor(endMin / 60))}:${pad(endMin % 60)}`;\n\nreturn [{ json: {\n  ok: true, date, time, service, customer_name,\n  start: `${date}T${time}:00`,\n  end: `${date}T${endTime}:00`,\n  end_time: endTime,\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [672, 0],
+      "id": "584d3c58-23ca-40d9-af33-3e59c9b65260",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "77891fbb-25de-4a30-815c-56f2938322e9",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [896, 0],
+      "id": "b09e1191-85c1-4a09-b4ce-908449d7b730",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "calendar": { "__rl": true, "value": "YOUR_CALENDAR_ID", "mode": "id" },
+        "start": "={{ $json.start }}",
+        "end": "={{ $json.end }}",
+        "additionalFields": {
+          "summary": "={{ $json.service }} - {{ $json.customer_name }}"
+        }
+      },
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [1136, -96],
+      "id": "b5e0d5cd-0aeb-4e51-a0b6-b037a244d868",
+      "name": "Create an event",
+      "credentials": {
+        "googleCalendarOAuth2Api": { "id": "", "name": "Google Calendar account" }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { success: true, date: $('Code in JavaScript').first().json.date, time: $('Code in JavaScript').first().json.time, service: $('Code in JavaScript').first().json.service, customer_name: $('Code in JavaScript').first().json.customer_name } }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1344, -96],
+      "id": "d8ee750e-b496-4657-853a-37cabcdf2871",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { success: false, reason: $json.reason } }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1136, 128],
+      "id": "718d3ab4-9e4b-4f60-a3b8-8cee31a28658",
+      "name": "Respond to Webhook1"
+    }
+  ],
+  "connections": {
+    "Webhook": { "main": [[{ "node": "Edit Fields", "type": "main", "index": 0 }]] },
+    "Edit Fields": { "main": [[{ "node": "Get many events", "type": "main", "index": 0 }]] },
+    "Get many events": { "main": [[{ "node": "Code in JavaScript", "type": "main", "index": 0 }]] },
+    "Code in JavaScript": { "main": [[{ "node": "If", "type": "main", "index": 0 }]] },
+    "If": {
+      "main": [
+        [{ "node": "Create an event", "type": "main", "index": 0 }],
+        [{ "node": "Respond to Webhook1", "type": "main", "index": 0 }]
+      ]
+    },
+    "Create an event": { "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "timezone": "Europe/Bratislava" }
+}
